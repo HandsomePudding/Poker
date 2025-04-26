@@ -491,7 +491,7 @@ function App() {
             </div>
             <div className="profit-summary">
               <div className={`profit-amount ${currentProfit >= 0 ? 'profit-positive' : 'profit-negative'}`}>
-                {currentProfit >= 0 ? '+' : ''}{currentProfit}
+                {currentProfit >= 0 ? '+' : ''}{currentProfit.toFixed(1)}
                 <span className="profit-label">{currentProfit >= 0 ? ' Profit' : ' Loss'}</span>
               </div>
               <div className="bet-details">
