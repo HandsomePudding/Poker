@@ -7,7 +7,7 @@ module poker::poker;
 // https://docs.sui.io/concepts/sui-move-concepts/conventions
 
 
-module poker::poker {
+module poker::POKERTOEN {
     use sui::object::{UID, Self};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
@@ -15,11 +15,16 @@ module poker::poker {
     use sui::table::{Self, Table};
     use sui::random::Random;
     use std::vector;
+    use sui::balance::{Self, Balance, Supply};
+    use sui::sui::SUI;
+    use sui::coin::{Self, Coin, TreasuryCap};
+    use sui::package::Publisher;
+    use sui::url;
 
     // 游戏币余额存储，真实balance在这个基础上 除10
-    public struct GameStore has key {
+    public struct PokerGame has key {
         id: UID,
-        balances: Table<address, u64>
+        pool: Balance<SUI>
     }
 
     // 卡牌结构
@@ -30,10 +35,19 @@ module poker::poker {
 
     // 游戏结果事件
     public struct GameResultEvent has copy, drop {
-        final_balance: u64,
         winner_region: u8,
-        prize: u64,
         cards: vector<Card>
+    }
+
+    public struct POKERTOEN has drop {}
+
+    public struct PokerTreasuryCap has key {
+        id: UID,
+        supply: Supply<POKERTOEN>
+    }
+
+    public struct AdminCap has key {
+        id : UID
     }
 
     // 常量定义
@@ -57,81 +71,154 @@ module poker::poker {
     const ERROR_INSUFFICIENT_BALANCE: u64 = 1;
     const ERROR_INVALID_BET: u64 = 2;
 
+    const TOKEN_EXCHANGE_RATE: u64 = 100; // 1 SUI = 100 POKERTOEN
+    const SUI_DECIMALS: u64 = 1_000_000_000;
+    const POKER_DECIMALS: u64 = 10;
+
     // 初始化存储
-    fun init(ctx: &mut TxContext) {
-        let store = GameStore {
+    fun init(token: POKERTOEN, ctx: &mut TxContext) {
+        // 创建代币
+        let (treasury, metadata) = coin::create_currency(
+            token,
+            1,
+            b"Poker",
+            b"POKERTOEN",
+            b"The official currency of the Poker Game",
+            option::some(url::new_unsafe_from_bytes(b"https://hackathon.oss-cn-beijing.aliyuncs.com/pokerToken.png")),
+            ctx
+        );
+
+        transfer::public_freeze_object(metadata);
+
+        let store = PokerGame {
             id: object::new(ctx),
-            balances: table::new(ctx)
+            pool: balance::zero<SUI>()
         };
         transfer::share_object(store);
-    }
 
-    public struct BalanceEvent has copy, drop {
-        balances: u64
-    }
-
-    // 查询游戏币余额
-    public entry fun get_balance(store: &GameStore,  ctx: &mut TxContext){
-        let mut coins = 0;
-        let addr = tx_context::sender(ctx);
-        if (table::contains(&store.balances, addr)) {
-            coins = *table::borrow(&store.balances, addr)
+        let admin = AdminCap{
+            id : object::new(ctx)
         };
-        sui::event::emit(BalanceEvent {
-            balances: coins
-        });
+        transfer::transfer(admin, ctx.sender());
+
+        // 创建代币控制权
+        let treasury_cap = PokerTreasuryCap {
+            id: object::new(ctx),
+            supply: coin::treasury_into_supply(treasury)
+        };
+        transfer::share_object(treasury_cap);
     }
 
-    fun get_balance_internal(store: &GameStore,  ctx: &mut TxContext): u64 {
-        let mut coins = 0;
-        let addr = tx_context::sender(ctx);
-        if (table::contains(&store.balances, addr)) {
-            coins = *table::borrow(&store.balances, addr)
-        };
-        coins
+
+    // 玩家购买代币
+    public entry fun buy_poker_tokens(
+        treasury: &mut PokerTreasuryCap,
+        game: &mut PokerGame,
+        payment: Coin<SUI>,
+        ctx: &mut TxContext
+    ) {
+        let sui_amount = coin::value(&payment);
+        assert!(sui_amount > 0, 0);
+
+        // 全部转入奖池
+        balance::join(&mut game.pool, coin::into_balance(payment));
+
+        // 铸造代币（1 SUI = 100 Token）
+        let token_amount = sui_amount * TOKEN_EXCHANGE_RATE * POKER_DECIMALS / SUI_DECIMALS;
+        let tokens = mint(treasury, token_amount, ctx);
+
+        // 直接转给玩家
+        transfer::public_transfer(tokens, tx_context::sender(ctx));
     }
 
-    // 添加游戏币
-    public entry fun add_balance(store: &mut GameStore, amount: u64, ctx: &mut TxContext) {
-        let sender = tx_context::sender(ctx);
-        let mut final_balance = 0;
-        
-        if (!table::contains(&store.balances, sender)) {
-            table::add(&mut store.balances, sender, amount);
-            final_balance = amount;
-        } else {
-            let balance = table::borrow_mut(&mut store.balances, sender);
-            *balance = *balance + amount;
-            final_balance = *balance;
-        };
+    // 卖出代币（100 POKERTOEN = 1 SUI）
+    public entry fun sell_tokens(
+        treasury: &mut PokerTreasuryCap,
+        game: &mut PokerGame,
+        tokens: Coin<POKERTOEN>,
+        ctx: &mut TxContext
+    ) {
+        let token_amount = coin::value(&tokens);
+        assert!(token_amount > 0, 10);
 
-        // 余额更新
-        sui::event::emit(BalanceEvent {
-            balances: final_balance
-        });
+        // 计算可兑换的SUI数量
+        let sui_amount = token_amount * SUI_DECIMALS / TOKEN_EXCHANGE_RATE / POKER_DECIMALS;
+        assert!(balance::value(&game.pool) >= sui_amount, 11);
+
+        // 销毁玩家代币
+        burn(treasury, coin::into_balance(tokens));
+
+        // 从奖池提取SUI给玩家
+        let sui_coin = coin::from_balance(
+            balance::split(&mut game.pool, sui_amount),
+            ctx
+        );
+        transfer::public_transfer(sui_coin, tx_context::sender(ctx));
+    }
+
+    // 铸造代币
+    fun mint(
+        treasury: &mut PokerTreasuryCap,
+        amount: u64,
+        ctx: &mut TxContext
+    ): Coin<POKERTOEN> {
+        coin::from_balance(
+            balance::increase_supply(&mut treasury.supply, amount),
+            ctx
+        )
+    }
+
+
+    fun burn(treasury: &mut PokerTreasuryCap, balance: Balance<POKERTOEN>): u64 {
+        treasury.supply.decrease_supply(balance)
+    }
+
+    // 管理员提现
+    public entry fun withdraw_pool(
+        _: &AdminCap,
+        treasury: &mut PokerTreasuryCap,
+        game: &mut PokerGame,
+        ctx: &mut TxContext
+    ) {
+        let supply = treasury.supply.supply_value();
+        let count = supply * SUI_DECIMALS / TOKEN_EXCHANGE_RATE / POKER_DECIMALS;
+        let amount = if (game.pool.value() > count) game.pool.value() - count else 0;
+        if(amount > 0){
+            let sui_coin = coin::from_balance(
+                balance::split(&mut game.pool, amount),
+                ctx
+            );
+            transfer::public_transfer(sui_coin, ctx.sender());
+        }
     }
 
     // 游戏主逻辑
     public entry fun play_game(
-        store: &mut GameStore,
+        treasury: &mut PokerTreasuryCap,
+        game: &mut PokerGame,
         random: &Random,
-        bet_a: u64,
-        bet_b: u64,
-        bet_c: u64,
-        bet_d: u64,
-        bet_e: u64,
+        bet_a: Coin<POKERTOEN>,
+        bet_b: Coin<POKERTOEN>,
+        bet_c: Coin<POKERTOEN>,
+        bet_d: Coin<POKERTOEN>,
+        bet_e: Coin<POKERTOEN>,
         ctx: &mut TxContext
     ) {
-        let sender = tx_context::sender(ctx);
-        let total_bet = bet_a + bet_b + bet_c + bet_d + bet_e;
-        
-        // 检查余额是否足够
-        assert!(get_balance_internal(store, ctx) >= total_bet, ERROR_INSUFFICIENT_BALANCE);
-        assert!(total_bet > 0, ERROR_INVALID_BET);
+        let bet_a_value = coin::value(&bet_a);
+        let bet_b_value = coin::value(&bet_b);
+        let bet_c_value = coin::value(&bet_c);
+        let bet_d_value = coin::value(&bet_d);
+        let bet_e_value = coin::value(&bet_e);
 
-        // 扣除下注金额
-        let balance = table::borrow_mut(&mut store.balances, sender);
-        *balance = *balance - total_bet;
+        let total_bet = bet_a_value + bet_b_value + bet_c_value + bet_d_value + bet_e_value;
+        assert!(total_bet > 0, 2);
+
+        // 销毁下注的 POKERTOEN
+        burn(treasury, coin::into_balance(bet_a));
+        burn(treasury, coin::into_balance(bet_b));
+        burn(treasury, coin::into_balance(bet_c));
+        burn(treasury, coin::into_balance(bet_d));
+        burn(treasury, coin::into_balance(bet_e));
 
         // 抽牌
         let cards = draw_unique_cards(random, ctx);
@@ -146,35 +233,34 @@ module poker::poker {
 
         // 计算奖金
         let prize = if (winner == REGION_A) {
-            bet_a * PRIZE_MULTIPLIER / PRIZE_DIVIDER
+            bet_a_value * PRIZE_MULTIPLIER / PRIZE_DIVIDER
         } else if (winner == REGION_B) {
-            bet_b * PRIZE_MULTIPLIER / PRIZE_DIVIDER
+            bet_b_value * PRIZE_MULTIPLIER / PRIZE_DIVIDER
         } else if (winner == REGION_C) {
-            bet_c * PRIZE_MULTIPLIER / PRIZE_DIVIDER
+            bet_c_value * PRIZE_MULTIPLIER / PRIZE_DIVIDER
         } else if (winner == REGION_D) {
-            bet_d * PRIZE_MULTIPLIER / PRIZE_DIVIDER
+            bet_d_value * PRIZE_MULTIPLIER / PRIZE_DIVIDER
         } else {
-            bet_e * PRIZE_MULTIPLIER / PRIZE_DIVIDER
+            bet_e_value * PRIZE_MULTIPLIER / PRIZE_DIVIDER
         };
 
-        // 发放奖金
-        let balance = table::borrow_mut(&mut store.balances, sender);
-        *balance = *balance + prize;
-        let mut coins = *balance;
+        // 发奖
+        if (prize > 0) {
+            let prize_tokens = mint(treasury, prize, ctx);
+            transfer::public_transfer(prize_tokens, tx_context::sender(ctx));
+        };
 
         // 发送事件
         event::emit(GameResultEvent {
-            final_balance: coins,
             winner_region: winner,
-            prize,
             cards
-        });
+        })
     }
 
     // 初始化牌组
     fun init_card_pool(): vector<Card> {
         let suits = vector[SPADE, HEART, CLUB, DIAMOND];
-        let mut cards = vector::empty();
+        let mut cards = std::vector::empty();
         let mut i = 0;
         while (i < vector::length(&suits)) {
             let mut j = 2; // 从2开始，A最大
@@ -247,5 +333,10 @@ module poker::poker {
     // 牌面权重
     fun get_card_weight(value: u8): u8 {
         if (value == 1) { 14 } else { value } // A的value是1，但权重是14
+    }
+
+    // 打赏
+    public entry fun reward(game: &mut PokerGame, payment: Coin<SUI>) {
+        game.pool.join(payment.into_balance());
     }
 }
