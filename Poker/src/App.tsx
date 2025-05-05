@@ -438,10 +438,12 @@ function App() {
         const newSui = await getSuiBalance(account.address);
         setWalletBalance(newPoker);
         setSuiBalance(newSui);
+        setSwapPokerBalance(newPoker);
+        setSwapSuiBalance(newSui);
       }
-      setShowSwap(false);
       setFromAmount('');
       setToAmount('');
+      setShowSwap(false);
     } catch (error) {
       console.error("Error swapping tokens:", error);
     }
