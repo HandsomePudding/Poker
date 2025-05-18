@@ -3,10 +3,10 @@
 ## 项目简介 | Project Introduction
 
 **中文**：  
-Poker Game 是一个基于 Sui 区块链的去中心化扑克游戏，支持 5 区域下注、链上公平发牌、4.8 倍赔率奖励、动画与音效、钱包集成、游戏币兑换、打赏等功能，界面美观，交互流畅。
+Lucky Poker 是一个基于 Sui 区块链的去中心化扑克游戏，支持 5 区域下注、链上公平发牌、4.8 倍赔率奖励、动画与音效、钱包集成、游戏币兑换、打赏等功能，界面美观，交互流畅。
 
 **English**:  
-Poker Game is a decentralized poker DApp built on the Sui blockchain. It supports 5 betting regions, on-chain fair dealing, 4.8x payout, smooth animations and sound effects, wallet integration, token swap, donation, and a beautiful UI.
+Lucky Poker is a decentralized poker DApp built on the Sui blockchain. It supports 5 betting regions, on-chain fair dealing, 4.8x payout, smooth animations and sound effects, wallet integration, token swap, donation, and a beautiful UI.
 
 ---
 
@@ -72,6 +72,13 @@ npm run dev
 
 - 点击页面右下角 Donate 按钮，可通过 SUI 向项目合约打赏支持开发者。
 - Click the Donate button to tip the project with SUI.
+
+---
+
+
+## 视频介绍 | Video Introduction
+
+- https://youtu.be/V8JO6N03lSM
 
 ---
 

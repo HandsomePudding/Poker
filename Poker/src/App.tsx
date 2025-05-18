@@ -567,7 +567,7 @@ function App() {
                   )}
                 </div>
               ) : (
-                <img src={cardBack} alt="Card" className="card" />
+              <img src={cardBack} alt="Card" className="card" />
               )}
             </div>
             <div className="tokens-container">
@@ -646,7 +646,7 @@ function App() {
           </button>
           <button className="action-button pretty-submit-btn" onClick={handleSubmit} disabled={submitLoading || totalBet === 0}>
             {submitLoading ? 'Submitting...' : 'Submit'}
-          </button>
+        </button>
         </div>
       </div>
 
