@@ -1,4 +1,4 @@
-# Poker Game 扑克牌游戏
+# Lucky Poker 扑克牌游戏
 
 ## 项目简介 | Project Introduction
 
